@@ -1,25 +1,37 @@
+use egui_plot::{Bar, BarChart, Plot};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
-#[derive(serde::Deserialize, serde::Serialize)]
-#[serde(default)] // if we add new fields, give them default values when deserializing old state
-pub struct TemplateApp {
-    // Example stuff:
-    label: String,
+#[derive(Deserialize, Serialize)]
+#[serde(default)]
+pub struct PityExperimentApp {
+    // Parameters
+    proba: f32,
+    rounds: usize,
+    pity_limit: usize,
+    num_simu: usize,
 
-    #[serde(skip)] // This how you opt-out of serialization of a field
-    value: f32,
+    // Results
+    #[serde(skip)]
+    histogram: Option<Vec<usize>>,
+    #[serde(skip)]
+    last_run_simulation: usize,
 }
 
-impl Default for TemplateApp {
+impl Default for PityExperimentApp {
     fn default() -> Self {
         Self {
-            // Example stuff:
-            label: "Hello World!".to_owned(),
-            value: 2.7,
+            proba: 1.0 / 20.0,
+            rounds: 2000,
+            pity_limit: 20,
+            num_simu: 1000,
+            histogram: None,
+            last_run_simulation: 0,
         }
     }
 }
 
-impl TemplateApp {
+impl PityExperimentApp {
     /// Called once before the first frame.
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         // This is also where you can customize the look and feel of egui using
@@ -33,9 +45,39 @@ impl TemplateApp {
 
         Default::default()
     }
+    fn pity_experiment(&self, proba: f32, num_rounds: usize, pity_limit: usize) -> usize {
+        let mut rng = rand::rng();
+        let mut num_wins = 0;
+        let mut pity_counter = 0;
+        for _ in 0..num_rounds {
+            if pity_counter >= pity_limit {
+                num_wins += 1;
+                pity_counter = 0;
+            } else {
+                let win = rng.random::<f32>() < proba;
+                if win {
+                    pity_counter = 0;
+                    num_wins += 1;
+                } else {
+                    pity_counter += 1;
+                }
+            }
+        }
+        num_wins
+    }
+
+    fn run_simulation(&mut self) {
+        let mut hist = Vec::with_capacity(self.num_simu);
+        for _ in 0..self.num_simu {
+            let wins = self.pity_experiment(self.proba, self.rounds, self.pity_limit);
+            hist.push(wins);
+        }
+        self.histogram = Some(hist);
+        self.last_run_simulation += 1;
+    }
 }
 
-impl eframe::App for TemplateApp {
+impl eframe::App for PityExperimentApp {
     /// Called by the frame work to save state before shutdown.
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -66,44 +108,46 @@ impl eframe::App for TemplateApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            // The central panel the region left after adding TopPanel's and SidePanel's
-            ui.heading("eframe template");
+            ui.heading("Pity Experiment Simulator");
 
+            // Parameter controls
             ui.horizontal(|ui| {
-                ui.label("Write something: ");
-                ui.text_edit_singleline(&mut self.label);
+                ui.label("Probability per round:");
+                ui.add(egui::Slider::new(&mut self.proba, 0.0..=1.0).logarithmic(true));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Rounds per simulation:");
+                ui.add(egui::DragValue::new(&mut self.rounds).range(1..=100_000));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Pity limit (auto win after):");
+                ui.add(egui::DragValue::new(&mut self.pity_limit).range(1..=1000));
+            });
+            ui.horizontal(|ui| {
+                ui.label("Number of simulations:");
+                ui.add(egui::DragValue::new(&mut self.num_simu).range(1..=10_000));
             });
 
-            ui.add(egui::Slider::new(&mut self.value, 0.0..=10.0).text("value"));
-            if ui.button("Increment").clicked() {
-                self.value += 1.0;
+            if ui.button("Run Simulation").clicked() {
+                self.run_simulation();
             }
 
-            ui.separator();
+            // Show histogram
+            if let Some(hist) = &self.histogram {
+                ui.separator();
+                ui.label(format!(
+                    "Histogram of total wins per run (last run of simulation #{})",
+                    self.last_run_simulation
+                ));
+                let bars: Vec<Bar> = hist.iter().enumerate().map(|(i, &count)| {
+                    Bar::new(i as f64, count as f64)
+                }).collect();
 
-            ui.add(egui::github_link_file!(
-                "https://github.com/emilk/eframe_template/blob/main/",
-                "Source code."
-            ));
-
-            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                powered_by_egui_and_eframe(ui);
-                egui::warn_if_debug_build(ui);
-            });
+                // Create and show the bar chart
+                Plot::new("histogram_plot").show(ui, |plot_ui| {
+                    plot_ui.bar_chart(BarChart::new(bars));
+                });
+            }
         });
     }
-}
-
-fn powered_by_egui_and_eframe(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        ui.label("Powered by ");
-        ui.hyperlink_to("egui", "https://github.com/emilk/egui");
-        ui.label(" and ");
-        ui.hyperlink_to(
-            "eframe",
-            "https://github.com/emilk/egui/tree/master/crates/eframe",
-        );
-        ui.label(".");
-    });
 }
