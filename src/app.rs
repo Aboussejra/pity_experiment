@@ -112,8 +112,8 @@ impl eframe::App for PityExperimentApp {
 
             // Parameter controls
             ui.horizontal(|ui| {
-                ui.label("Probability per round:");
-                ui.add(egui::Slider::new(&mut self.proba, 0.0..=1.0).logarithmic(true));
+                ui.label("Probability of winning per round:");
+                ui.add(egui::Slider::new(&mut self.proba, 0.0..=1.0).fixed_decimals(1));
             });
             ui.horizontal(|ui| {
                 ui.label("Rounds per simulation:");
@@ -139,8 +139,23 @@ impl eframe::App for PityExperimentApp {
                     "Histogram of total wins per run (last run of simulation #{})",
                     self.last_run_simulation
                 ));
-                let bars: Vec<Bar> = hist.iter().enumerate().map(|(i, &count)| {
-                    Bar::new(i as f64, count as f64)
+               // Example: binning into 10 bars
+                let num_bars = 10;
+                let min = *hist.iter().min().unwrap_or(&0);
+                let max = *hist.iter().max().unwrap_or(&0);
+                let bin_width = ((max - min) as f64 / num_bars as f64).ceil().max(1.0) as usize;
+
+                let mut bins: Vec<usize> = vec![0usize; num_bars];
+                for &value in hist {
+                    let idx = ((value - min) / bin_width).min(num_bars - 1);
+                    bins[idx] += 1;
+                }
+
+                // Now create Vec<Bar>
+                let bars: Vec<Bar> = bins.iter().enumerate().map(|(i, &count)| {
+                    // Use the bin midpoint for x
+                    let x = min as f64 + (i as f64 + 0.5) * bin_width as f64;
+                    Bar::new(x, count as f64).width(bin_width as f64)
                 }).collect();
 
                 // Create and show the bar chart
